@@ -1,112 +1,168 @@
 package com.bank.model;
 
-/**
- * Savings Account class - Concrete implementation of Account.
- * Features: 3.5% annual interest rate, minimum balance of $100,
- * maximum 6 withdrawals per month, monthly interest accrual.
- * Demonstrates: Inheritance, Polymorphism
- */
-public class SavingsAccount extends Account {
+import com.bank.exception.InsufficientFundsException;
+import com.bank.exception.InvalidTransactionException;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+
+public abstract class Account {
     
-    private static final double INTEREST_RATE = 0.035; // 3.5% annual interest
-    private static final double MINIMUM_BALANCE = 100.0; // Minimum balance requirement
-    private static final int MAX_MONTHLY_WITHDRAWALS = 6; // Maximum withdrawals per month
+    private final String accountNumber;
+    private final String customerId;
+    protected double balance;
+    private final LocalDateTime createdAt;
+    private AccountStatus status;
+    private final List<Transaction> transactions;
     
-    private int monthlyWithdrawals;
-    
-    /**
-     * Constructor for SavingsAccount
-     * Ensures initial balance meets minimum requirement
-     */
-    public SavingsAccount(String customerId, double initialBalance) {
-        super(customerId, Math.max(initialBalance, MINIMUM_BALANCE));
-        this.monthlyWithdrawals = 0;
-    }
-    
-    @Override
-    public String getAccountType() {
-        return "SAVINGS";
-    }
-    
-    @Override
-    public double getInterestRate() {
-        return INTEREST_RATE;
-    }
-    
-    /**
-     * Check if withdrawal is allowed based on account rules
-     * - Cannot withdraw if balance would go below minimum balance
-     * - Cannot exceed monthly withdrawal limit
-     */
-    @Override
-    public boolean canWithdraw(double amount) {
-        if (amount <= 0) {
-            return false;
+    protected Account(String customerId, double initialBalance) {
+        if (initialBalance < 0) {
+            throw new IllegalArgumentException("Initial balance cannot be negative");
         }
         
-        if (balance - amount < MINIMUM_BALANCE) {
-            return false;
-        }
+        this.accountNumber = generateAccountNumber();
+        this.customerId = customerId;
+        this.balance = initialBalance;
+        this.createdAt = LocalDateTime.now();
+        this.status = AccountStatus.ACTIVE;
+        this.transactions = new ArrayList<>();
         
-        if (monthlyWithdrawals >= MAX_MONTHLY_WITHDRAWALS) {
-            return false;
-        }
-        
-        return true;
-    }
-    
-    /**
-     * Override withdraw to track monthly withdrawal count
-     */
-    @Override
-    public void withdraw(double amount) throws InsufficientFundsException {
-        super.withdraw(amount);
-        monthlyWithdrawals++;
-    }
-    
-    /**
-     * Apply monthly interest to account balance
-     * Interest = balance * (annual rate / 12)
-     */
-    @Override
-    public void applyInterest() {
-        double monthlyInterest = balance * (INTEREST_RATE / 12);
-        if (monthlyInterest > 0) {
-            balance += monthlyInterest;
+        if (initialBalance > 0) {
             addTransaction(new Transaction(
-                TransactionType.INTEREST,
-                monthlyInterest,
-                "Monthly interest accrual"
+                TransactionType.DEPOSIT, 
+                initialBalance, 
+                "Initial deposit"
             ));
         }
     }
     
-    /**
-     * Reset monthly withdrawal counter
-     * Should be called at the start of each month
-     */
-    public void resetMonthlyWithdrawals() {
-        this.monthlyWithdrawals = 0;
+    private String generateAccountNumber() {
+        return "ACC" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
     
-    /**
-     * Get current monthly withdrawal count
-     */
-    public int getMonthlyWithdrawals() {
-        return monthlyWithdrawals;
+    public String getAccountNumber() {
+        return accountNumber;
     }
     
-    /**
-     * Get remaining withdrawals allowed for current month
-     */
-    public int getRemainingMonthlyWithdrawals() {
-        return MAX_MONTHLY_WITHDRAWALS - monthlyWithdrawals;
+    public String getCustomerId() {
+        return customerId;
     }
     
-    /**
-     * Get minimum balance requirement
-     */
-    public double getMinimumBalance() {
-        return MINIMUM_BALANCE;
+    public double getBalance() {
+        return balance;
+    }
+    
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+    
+    public AccountStatus getStatus() {
+        return status;
+    }
+    
+    public List<Transaction> getTransactions() {
+        return Collections.unmodifiableList(transactions);
+    }
+    
+    public void deposit(double amount) {
+        validateAmount(amount);
+        
+        if (status != AccountStatus.ACTIVE) {
+            throw new IllegalStateException("Account is not active");
+        }
+        
+        balance += amount;
+        addTransaction(new Transaction(TransactionType.DEPOSIT, amount, "Deposit"));
+    }
+    
+    public void withdraw(double amount) throws InsufficientFundsException {
+        validateAmount(amount);
+        
+        if (status != AccountStatus.ACTIVE) {
+            throw new IllegalStateException("Account is not active");
+        }
+        
+        if (balance < amount) {
+            throw new InsufficientFundsException(amount, balance);
+        }
+        
+        if (!canWithdraw(amount)) {
+            throw new InvalidTransactionException("Withdrawal not allowed per account rules");
+        }
+        
+        balance -= amount;
+        addTransaction(new Transaction(TransactionType.WITHDRAWAL, amount, "Withdrawal"));
+    }
+    
+    public void transferTo(Account targetAccount, double amount) 
+            throws InsufficientFundsException {
+        
+        if (targetAccount == null) {
+            throw new IllegalArgumentException("Target account cannot be null");
+        }
+        
+        if (this.equals(targetAccount)) {
+            throw new IllegalArgumentException("Cannot transfer to same account");
+        }
+        
+        this.withdraw(amount);
+        
+        try {
+            targetAccount.deposit(amount);
+            
+            this.transactions.get(this.transactions.size() - 1)
+                .setDescription("Transfer to " + targetAccount.getAccountNumber());
+            
+            targetAccount.transactions.get(targetAccount.transactions.size() - 1)
+                .setDescription("Transfer from " + this.accountNumber);
+            
+        } catch (Exception e) {
+            this.deposit(amount);
+            throw new InvalidTransactionException("Transfer failed: " + e.getMessage());
+        }
+    }
+    
+    protected void addTransaction(Transaction transaction) {
+        transactions.add(transaction);
+    }
+    
+    private void validateAmount(double amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be positive");
+        }
+    }
+    
+    public void close() {
+        if (balance > 0) {
+            throw new IllegalStateException("Cannot close account with positive balance");
+        }
+        this.status = AccountStatus.CLOSED;
+    }
+    
+    public abstract String getAccountType();
+    public abstract boolean canWithdraw(double amount);
+    public abstract void applyInterest();
+    public abstract double getInterestRate();
+    
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Account account = (Account) o;
+        return accountNumber.equals(account.accountNumber);
+    }
+    
+    @Override
+    public int hashCode() {
+        return accountNumber.hashCode();
+    }
+    
+    @Override
+    public String toString() {
+        return String.format("%s[number=%s, balance=$%.2f, status=%s]",
+            getAccountType(), accountNumber, balance, status);
     }
 }

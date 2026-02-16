@@ -1,8 +1,8 @@
 package com.bank.model;
 
-import java.util.List;
+import com.bank.exception.InsufficientFundsException;
 
-import main.java.com.bank.exception.InsufficientFundsException;
+import java.util.List;
 
 /**
  * Savings Account class - Concrete implementation of Account.
